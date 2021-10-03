@@ -318,7 +318,35 @@ func (p *Provisioner) createDeployment(nfsServerOpts *KernelNFSServerOptions) er
 								},
 							},
 						).
-						WithResources(&resourceRequirements),
+						WithResources(&resourceRequirements).
+						WithLivenessProbe(&corev1.Probe{
+							Handler: corev1.Handler{
+								Exec: &corev1.ExecAction{
+									Command: []string{
+										"bash",
+										"-c",
+										"test `touch /nfsshare/live && ls -alhR /nfsshare | wc -l` -gt 2",
+									},
+								},
+							},
+							InitialDelaySeconds: 30,
+							TimeoutSeconds:      5,
+							PeriodSeconds:       10,
+						}).
+						WithReadinessProbe(&corev1.Probe{
+							Handler: corev1.Handler{
+								Exec: &corev1.ExecAction{
+									Command: []string{
+										"bash",
+										"-c",
+										"test `(mount -t nfs $HOSTNAME:/ /mnt && touch /mnt/ready && ls -alhR /mnt && umount /mnt || exit 1) | wc -l` -gt 2",
+									},
+								},
+							},
+							InitialDelaySeconds: 30,
+							TimeoutSeconds:      5,
+							PeriodSeconds:       10,
+						}),
 				).
 				WithVolumeBuilders(
 					volume.NewBuilder().

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 #Copyright 2020 The OpenEBS Authors
 #
@@ -102,8 +102,9 @@ if [ $GOOS = "windows" ]; then
     output_name+='.exe'
 fi
 
-env GOOS=$GOOS GOARCH=$GOARCH go build ${BUILD_TAG} -ldflags \
-    "-X github.com/openebs/dynamic-nfs-provisioner/provisioner.NFSServerDefaultImage=${NFSSERVERIMG}
+env CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH /usr/local/go/bin/go build ${BUILD_TAG} -ldflags \
+    "-extldflags '-static'
+     -X github.com/openebs/dynamic-nfs-provisioner/provisioner.NFSServerDefaultImage=${NFSSERVERIMG}
      -X github.com/openebs/maya/pkg/version.GitCommit=${GIT_COMMIT}
      -X github.com/openebs/maya/pkg/version.Version=${VERSION}" \
     -o $output_name\

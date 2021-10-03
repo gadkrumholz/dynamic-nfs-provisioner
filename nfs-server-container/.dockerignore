@@ -1,1 +1,6 @@
-*git
+*
+!entrypoint.sh
+!exports
+!.bashrc
+!README.md
+!Dockerfile

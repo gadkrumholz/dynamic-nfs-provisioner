@@ -1,306 +1,174 @@
-# nfs-server-alpine
+# erichough/nfs-server
 
-A handy NFS Server image comprising Alpine Linux and NFS v4 only, over TCP on port 2049.
+A lightweight, robust, flexible, and containerized NFS server.
 
-## Overview
+## Why?
 
-The image comprises of;
+This is the only containerized NFS server that offers **all** of the following features:
 
-- [Alpine Linux](http://www.alpinelinux.org/) v3.8.1. Alpine Linux is a security-oriented, lightweight Linux distribution based on [musl libc](https://www.musl-libc.org/) (v1.1.19) and [BusyBox](https://www.busybox.net/).
-- NFS v4 only, over TCP on port 2049. Rpcbind is enabled for now to overcome a bug with slow startup, it shouldn't be required.
+- small (~15MB) Alpine Linux image
+- NFS versions 3, 4, or both simultaneously
+- clean teardown of services upon termination (no lingering `nfsd` processes on Docker host)
+- flexible construction of `/etc/exports`
+- extensive server configuration via environment variables
+- human-readable logging (with a helpful [debug mode](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/logging.md))
+- *optional* bonus features
+  - [Kerberos security](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/kerberos.md)
+  - [NFSv4 user ID mapping](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/nfs4-user-id-mapping.md) via [`idmapd`](http://man7.org/linux/man-pages/man8/idmapd.8.html)
+  - [AppArmor](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/apparmor.md) compatibility
 
-[Confd](https://www.confd.io/) is no longer used, making the image simpler & smaller and providing wider device compatibility.
+## Table of Contents
 
-For ARM versions, tag 6-arm is based on [hypriot/rpi-alpine](https://github.com/hypriot/rpi-alpine) and tag 7 onwards based on the stock Alpine image. Tag 7 uses confd v0.16.0.
+* [Requirements](#requirements)
+* Usage
+  * [Starting the server](#starting-the-server)
+  * [Mounting filesystems from a client](#mounting-filesystems-from-a-client)
+* Optional features
+  * [Debug logging](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/logging.md)
+  * [Kerberos security](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/kerberos.md)
+  * [NFSv4 user ID mapping](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/nfs4-user-id-mapping.md)
+  * [AppArmor integration](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/apparmor.md)
+* Advanced
+  * [automatically load required kernel modules](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/auto-load-kernel-modules.md)
+  * [custom server ports](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/ports.md)
+  * [custom NFS versions offered](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/nfs-versions.md)
+  * [performance tuning](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/performance-tuning.md)
+* [Help!](#help)
+* [Remaining tasks](#remaining-tasks)
+* [Acknowledgements](#acknowledgements)
 
-For previous tags 7, 8 & 9;
+## Requirements
 
-- Alpine Linux v3.7.0
-- Musl v1.1.18
-- Confd v0.14.0
+1. The Docker **host** kernel will need the following kernel modules
+   - `nfs`
+   - `nfsd`
+   - `rpcsec_gss_krb5` (*only if Kerberos is used*)
 
-For previous tag 6;
+   You can manually enable these modules on the Docker host with:
+   
+   `modprobe {nfs,nfsd,rpcsec_gss_krb5}`
+   
+   or you can just allow the container to [load them automatically](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/auto-load-kernel-modules.md).
+1. The container will need to run with `CAP_SYS_ADMIN` (or `--privileged`). This is necessary as the server needs to mount several filesystems *inside* the container to support its operation, and performing mounts from inside a container is impossible without these capabilities.
+1. The container will need local access to the files you'd like to serve via NFS. You can use Docker volumes, bind mounts, files baked into a custom image, or virtually any other means of supplying files to a Docker container.
 
-- Alpine Linux v3.6.0
-- Musl v1.1.15
+## Usage
 
-For previous tag 5;
+### Starting the server
 
-- Confd v0.13.0
+Starting the `erichough/nfs-server` image will launch an NFS server. You'll need to supply some information upon container startup, which we'll cover below, but briefly speaking your `docker run` command might look something like this:
 
-For previous tag 4;
+    docker run                                            \
+      -v /host/path/to/shared/files:/some/container/path  \
+      -v /host/path/to/exports.txt:/etc/exports:ro        \
+      --cap-add SYS_ADMIN                                 \
+      -p 2049:2049                                        \
+      erichough/nfs-server
 
-- Alpine Linux v3.5
-- Confd v0.12.0-dev
+Let's break that command down into its individual pieces to see what's required for a successful server startup.
 
-**Note:** There were some serious flaws with image versions 3 and earlier. Please use **4** or later. The earlier version are only here in case they are used in automated workflows.
+1. **Provide the files to be shared over NFS**
 
-When run, this container will make whatever directory is specified by the environment variable SHARED_DIRECTORY available to NFS v4 clients.
+   As noted in the [requirements](#requirements), the container will need local access to the files you'd like to share over NFS. Some ideas for supplying these files:
 
-`docker run -d --name nfs --privileged -v /some/where/fileshare:/nfsshare -e SHARED_DIRECTORY=/nfsshare itsthenetwork/nfs-server-alpine:latest`
+      * [bind mounts](https://docs.docker.com/storage/bind-mounts/) (`-v /host/path/to/shared/files:/some/container/path`)
+      * [volumes](https://docs.docker.com/storage/volumes/) (`-v some_volume:/some/container/path`)
+      * files [baked into](https://docs.docker.com/engine/reference/builder/#copy) custom image (e.g. in a `Dockerfile`: `COPY /host/files /some/container/path`)
 
-Add `--net=host` or `-p 2049:2049` to make the shares externally accessible via the host networking stack. This isn't necessary if using [Rancher](https://rancher.com/) or linking containers in some other way.
+   You may use any combination of the above, or any other means to supply files to the container.
 
-Adding `-e READ_ONLY` will cause the exports file to contain `ro` instead of `rw`, allowing only read access by clients.
+1. **Provide your desired [NFS exports](https://linux.die.net/man/5/exports) (`/etc/exports`)**
 
-Adding `-e SYNC=true` will cause the exports file to contain `sync` instead of `async`, enabling synchronous mode. Check the exports man page for more information: https://linux.die.net/man/5/exports.
+   You'll need to tell the server which **container directories** to share. You have *three options* for this; choose whichever one you prefer:
 
-Adding `-e PERMITTED="10.11.99.*"` will permit only hosts with an IP address starting 10.11.99 to mount the file share.
+   1. bind mount `/etc/exports` into the container
 
-Due to the `fsid=0` parameter set in the **/etc/exports file**, there's no need to specify the folder name when mounting from a client. For example, this works fine even though the folder being mounted and shared is /nfsshare:
+          docker run                                      \
+            -v /host/path/to/exports.txt:/etc/exports:ro  \
+            ...                                           \
+            erichough/nfs-server
 
-`sudo mount -v 10.11.12.101:/ /some/where/here`
+   1. provide each line of `/etc/exports` as an environment variable
 
-To be a little more explicit:
+       The container will look for environment variables that start with `NFS_EXPORT_` and end with an integer. e.g. `NFS_EXPORT_0`, `NFS_EXPORT_1`, etc.
 
-`sudo mount -v -o vers=4,loud 10.11.12.101:/ /some/where/here`
+          docker run                                                                       \
+            -e NFS_EXPORT_0='/container/path/foo                  *(ro,no_subtree_check)'  \
+            -e NFS_EXPORT_1='/container/path/bar 123.123.123.123/32(rw,no_subtree_check)'  \
+            ...                                                                            \
+            erichough/nfs-server
 
-To _unmount_:
+   1. bake `/etc/exports` into a custom image
 
-`sudo umount /some/where/here`
+       e.g. in a `Dockerfile`:
 
-The /etc/exports file contains these parameters unless modified by the environment variables listed above:
+       ```Dockerfile
+       FROM erichough/nfs-server
+       ADD /host/path/to/exports.txt /etc/exports
+       ```
 
-`*(rw,fsid=0,async,no_subtree_check,no_auth_nlm,insecure,no_root_squash)`
+1. **Use `--cap-add SYS_ADMIN` or `--privileged`**
 
-Note that the `showmount` command won't work against the server as rpcbind isn't running.
+   As noted in the [requirements](#requirements), the container will need additional privileges. So your `run` command will need *either*:
 
-### Privileged Mode
+       docker run --cap-add SYS_ADMIN ... erichough/nfs-server
+       
+    or
 
-You'll note above with the `docker run` command that privileged mode is required. Yes, this is a security risk but an unavoidable one it seems. You could try these instead: `--cap-add SYS_ADMIN --cap-add SETPCAP --security-opt=no-new-privileges` but I've not had any luck with them myself. You may fare better with your own combination of Docker and OS. The SYS_ADMIN capability is very, very broad in any case and almost as risky as privileged mode.
+       docker run --privileged ... erichough/nfs-server
 
-See the following sub-sections for information on doing the same in non-interactive environments.
+    Not sure which to use? Go for `--cap-add SYS_ADMIN` as it's the lesser of two evils.
 
-#### Kubernetes
+1. **Expose the server ports**
 
-As reported here https://github.com/sjiveson/nfs-server-alpine/issues/8 it appears Kubernetes requires the `privileged: true` option to be set:
+   You'll need to open up at least one server port for your client connections. The ports listed in the examples below are the defaults used by this image and most can be [customized](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/ports.md).
 
-```
-spec:
-  containers:
-  - name: ...
-    image: ...
-    securityContext:
-      privileged: true
-```
+   * If your clients connect via **NFSv4 only**, you can get by with just TCP port `2049`:
 
-To use capabilities instead:
+         docker run -p 2049:2049 ... erichough/nfs-server
 
-```
-spec:
-  containers:
-  - name: ...
-    image: ...
-    securityContext:
-      capabilities:
-        add: ["SYS_ADMIN", "SETPCAP"]
-```
+   * If you'd like to support **NFSv3**, you'll need to expose a lot more ports:
 
-Note that AllowPrivilegeEscalation is automatically set to true when privileged mode is set to true or the SYS_ADMIN capability added.
+         docker run                          \
+           -p 2049:2049   -p 2049:2049/udp   \
+           -p 111:111     -p 111:111/udp     \
+           -p 32765:32765 -p 32765:32765/udp \
+           -p 32767:32767 -p 32767:32767/udp \
+           ...                               \
+           erichough/nfs-server
 
-#### Docker Compose v2/v3 or Rancher v1.x
+If you pay close attention to each of the items in this section, the server should start quickly and be ready to accept your NFS clients.
 
-When using Docker Compose you can specify privileged mode like so:
+### Mounting filesystems from a client
 
-```
-privileged: true
-```
+    # mount <container-IP>:/some/export /some/local/path
 
-To use capabilities instead:
+## Optional Features
 
-```
-cap_add:
-  - SYS_ADMIN
-  - SETPCAP
-```
+  * [Debug logging](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/logging.md)
+  * [Kerberos security](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/kerberos.md)
+  * [NFSv4 user ID mapping](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/nfs4-user-id-mapping.md)
+  * [AppArmor integration](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/apparmor.md)
 
-### RancherOS
+## Advanced
 
-You may need to do this at the CLI to get things working:
+  * [automatically load required kernel modules](https://github.com/ehough/docker-nfs-server/blob/develop/doc/feature/auto-load-kernel-modules.md)
+  * [customizing which ports are used](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/ports.md)
+  * [customizing NFS versions offered](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/nfs-versions.md)
+  * [performance tuning](https://github.com/ehough/docker-nfs-server/blob/develop/doc/advanced/performance-tuning.md)
 
-```
-sudo ros service enable kernel-headers
-sudo ros service up kernel-headers
-```
+## Help!
 
-Alternatively you can add this to the host's **cloud-config.yml** (or user data on the cloud):
+Please [open an issue](https://github.com/ehough/docker-nfs-server/issues) if you have any questions, constructive criticism, or can't get something to work.
 
-```
-#cloud-config
-rancher:
-  services_include:
-    kernel-headers: true
-```
+## Remaining tasks
 
-RancherOS also uses overlayfs for Docker so please read the next section.
+- figure out why `rpc.nfsd` [takes 5 minutes to startup/timeout](https://www.spinics.net/lists/linux-nfs/msg59728.html) unless `rpcbind` is running
+- add more examples
 
-### OverlayFS
+## Acknowledgements
 
-OverlayFS does not support NFS export so please volume mount into your NFS container from an alternative (hopefully one is available).
+This work was based on prior projects:
 
-On RancherOS the **/home**, **/media** and **/mnt** file systems are good choices as these are ext4.
-
-### Other Operating Systems
-
-You may need to ensure the **nfs** and **nfsd** kernel modules are loaded by running `modprobe nfs nfsd`.
-
-### Host Mode Networking & Rancher DNS
-
-You'll need to use this label if you are using host network mode and want other services to resolve the NFS service's name via Rancher DNS:
-
-```
-  labels:
-    io.rancher.container.dns: 'true'
-```
-
-### Mounting Within a Container
-
-The container requires the SYS_ADMIN capability, or, less securely, to be run in privileged mode.
-
-### Multiple Shares
-
-This image can be used to export and share multiple directories with a little modification. Be aware that NFSv4 dictates that the additional shared directories are subdirectories of the root share specified by SHARED_DIRECTORY.
-
-> Note its far easier to volume mount multiple directories as subdirectories of the root/first and share the root.
-
-To share multiple directories you'll need to mount additional volumes and specify additional environment variables in your docker run command. Here's an example:
-```
-docker run -d --name nfs --privileged -v /some/where/fileshare:/nfsshare -v /some/where/else:/nfsshare/another -e SHARED_DIRECTORY=/nfsshare -e SHARED_DIRECTORY_2=/nfsshare/another itsthenetwork/nfs-server-alpine:latest
-```
-
-You should then modify the **nfsd.sh** file to process the extra environment variables and add entries to the exports file. I've already included a working example to get you started:
-
-```
-if [ ! -z "${SHARED_DIRECTORY_2}" ]; then
-  echo "Writing SHARED_DIRECTORY_2 to /etc/exports file"
-  echo "{{SHARED_DIRECTORY_2}} {{PERMITTED}}({{READ_ONLY}},{{SYNC}},no_subtree_check,no_auth_nlm,insecure,no_root_squash)" >> /etc/exports
-  /bin/sed -i "s@{{SHARED_DIRECTORY_2}}@${SHARED_DIRECTORY_2}@g" /etc/exports
-fi
-```
-
-You'll find you can now mount the root share as normal and the second shared directory will be available as a subdirectory. However, you should now be able to mount the second share directly too. In both cases you don't need to specify the root directory name with the mount commands. Using the `docker run` command above to start a container using this image, the two mount commands would be:
-
-```
-sudo mount -v 10.11.12.101:/ /mnt/one
-sudo mount -v 10.11.12.101:/another /mnt/two
-```
-
-You might want to make the root share read only, or even make it inaccessible, to encourage users to only mount the correct, more specific shares directly. To do so you'll need to modify the exports file so the root share doesn't get configured based on the values assigned to the PERMITTED or SYNC environment variables.
-
-### What Good Looks Like
-
-A successful server start should produce log output like this:
-
-```
-Writing SHARED_DIRECTORY to /etc/exports file
-The PERMITTED environment variable is unset or null, defaulting to '*'.
-This means any client can mount.
-The READ_ONLY environment variable is unset or null, defaulting to 'rw'.
-Clients have read/write access.
-The SYNC environment variable is unset or null, defaulting to 'async' mode.
-Writes will not be immediately written to disk.
-Displaying /etc/exports contents:
-/nfsshare *(rw,fsid=0,async,no_subtree_check,no_auth_nlm,insecure,no_root_squash)
-
-Starting rpcbind...
-Displaying rpcbind status...
-   program version netid     address                service    owner
-    100000    4    tcp6      ::.0.111               -          superuser
-    100000    3    tcp6      ::.0.111               -          superuser
-    100000    4    udp6      ::.0.111               -          superuser
-    100000    3    udp6      ::.0.111               -          superuser
-    100000    4    tcp       0.0.0.0.0.111          -          superuser
-    100000    3    tcp       0.0.0.0.0.111          -          superuser
-    100000    2    tcp       0.0.0.0.0.111          -          superuser
-    100000    4    udp       0.0.0.0.0.111          -          superuser
-    100000    3    udp       0.0.0.0.0.111          -          superuser
-    100000    2    udp       0.0.0.0.0.111          -          superuser
-    100000    4    local     /var/run/rpcbind.sock  -          superuser
-    100000    3    local     /var/run/rpcbind.sock  -          superuser
-Starting NFS in the background...
-rpc.nfsd: knfsd is currently down
-rpc.nfsd: Writing version string to kernel: -2 -3 +4
-rpc.nfsd: Created AF_INET TCP socket.
-rpc.nfsd: Created AF_INET6 TCP socket.
-Exporting File System...
-exporting *:/nfsshare
-/nfsshare     	<world>
-Starting Mountd in the background...
-Startup successful.
-```
-
-### What Good Looks Like - Confd Versions
-
-```
-The PERMITTED environment variable is missing or null, defaulting to '*'.
-Any client can mount.
-The READ_ONLY environment variable is missing or null, defaulting to 'rw'
-Clients have read/write access.
-The SYNC environment variable is missing or null, defaulting to 'async'.
-Writes will not be immediately written to disk.
-Starting Confd population of files...
-confd 0.14.0 (Git SHA: 9fab9634, Go Version: go1.9.1)
-2018-05-07T18:24:39Z d62d37258311 /usr/bin/confd[14]: INFO Backend set to env
-2018-05-07T18:24:39Z d62d37258311 /usr/bin/confd[14]: INFO Starting confd
-2018-05-07T18:24:39Z d62d37258311 /usr/bin/confd[14]: INFO Backend source(s) set to
-2018-05-07T18:24:39Z d62d37258311 /usr/bin/confd[14]: INFO /etc/exports has md5sum 4f1bb7b2412ce5952ecb5ec22d8ed99d should be 92cc8fa446eef0e167648be03aba09e5
-2018-05-07T18:24:39Z d62d37258311 /usr/bin/confd[14]: INFO Target config /etc/exports out of sync
-2018-05-07T18:24:39Z d62d37258311 /usr/bin/confd[14]: INFO Target config /etc/exports has been updated
-Displaying /etc/exports contents...
-/nfsshare *(rw,fsid=0,async,no_subtree_check,no_auth_nlm,insecure,no_root_squash)
-Starting rpcbind...
-Displaying rpcbind status...
-   program version netid     address                service    owner
-    100000    4    tcp6      ::.0.111               -          superuser
-    100000    3    tcp6      ::.0.111               -          superuser
-    100000    4    udp6      ::.0.111               -          superuser
-    100000    3    udp6      ::.0.111               -          superuser
-    100000    4    tcp       0.0.0.0.0.111          -          superuser
-    100000    3    tcp       0.0.0.0.0.111          -          superuser
-    100000    2    tcp       0.0.0.0.0.111          -          superuser
-    100000    4    udp       0.0.0.0.0.111          -          superuser
-    100000    3    udp       0.0.0.0.0.111          -          superuser
-    100000    2    udp       0.0.0.0.0.111          -          superuser
-    100000    4    local     /var/run/rpcbind.sock  -          superuser
-    100000    3    local     /var/run/rpcbind.sock  -          superuser
-Starting NFS in the background...
-rpc.nfsd: knfsd is currently down
-rpc.nfsd: Writing version string to kernel: -2 -3 +4
-rpc.nfsd: Created AF_INET TCP socket.
-rpc.nfsd: Created AF_INET6 TCP socket.
-Exporting File System...
-exporting *:/nfsshare
-/nfsshare     	<world>
-Starting Mountd in the background...
-Startup successful.
-```
-
-### Dockerfile
-
-The Dockerfile used to create this image is available at the root of the file system on build.
-
-```
-FROM alpine:latest
-LABEL maintainer "Steven Iveson <steve@iveson.eu>"
-LABEL source "https://github.com/sjiveson/nfs-server-alpine"
-LABEL branch "master"
-COPY Dockerfile README.md /
-
-RUN apk add --no-cache --update --verbose nfs-utils bash iproute2 && \
-    rm -rf /var/cache/apk /tmp /sbin/halt /sbin/poweroff /sbin/reboot && \
-    mkdir -p /var/lib/nfs/rpc_pipefs /var/lib/nfs/v4recovery && \
-    echo "rpc_pipefs    /var/lib/nfs/rpc_pipefs rpc_pipefs      defaults        0       0" >> /etc/fstab && \
-    echo "nfsd  /proc/fs/nfsd   nfsd    defaults        0       0" >> /etc/fstab
-
-COPY exports /etc/
-COPY nfsd.sh /usr/bin/nfsd.sh
-COPY .bashrc /root/.bashrc
-
-RUN chmod +x /usr/bin/nfsd.sh
-
-ENTRYPOINT ["/usr/bin/nfsd.sh"]
-```
-
-### Acknowlegements
-
-Thanks to Torsten Bronger @bronger for the suggestion and help around implementing a multistage Docker build to better handle the inclusion of Confd (since removed).
+- [f-u-z-z-l-e/docker-nfs-server](https://github.com/f-u-z-z-l-e/docker-nfs-server)
+- [sjiveson/nfs-server-alpine](https://github.com/sjiveson/nfs-server-alpine)

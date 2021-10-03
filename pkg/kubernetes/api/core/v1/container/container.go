@@ -423,6 +423,20 @@ func (b *Builder) WithLivenessProbe(liveness *corev1.Probe) *Builder {
 	return b
 }
 
+// WithReadinessProbe sets the readiness probe of the container
+func (b *Builder) WithReadinessProbe(readiness *corev1.Probe) *Builder {
+	if readiness == nil {
+		b.errors = append(
+			b.errors,
+			errors.New("failed to build container object: nil readiness probe"),
+		)
+		return b
+	}
+
+	b.con.ReadinessProbe = readiness
+	return b
+}
+
 // WithLifeCycle sets the life cycle of the container
 func (b *Builder) WithLifeCycle(lc *corev1.Lifecycle) *Builder {
 	if lc == nil {

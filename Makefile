@@ -161,7 +161,7 @@ provisioner-nfs:
 	@echo "----------------------------"
 	@echo "--> provisioner-nfs    "
 	@echo "----------------------------"
-	@PNAME=${PROVISIONER_NFS} CTLNAME=${PROVISIONER_NFS} NFSSERVERIMG=${NFS_SERVER_IMAGE_TAG} sh -c "'$(PWD)/buildscripts/build.sh'"
+	@PNAME=${PROVISIONER_NFS} CTLNAME=${PROVISIONER_NFS} NFSSERVERIMG=${NFS_SERVER_IMAGE_TAG} bash -c "'$(PWD)/buildscripts/build.sh'"
 
 .PHONY: provisioner-nfs-image
 provisioner-nfs-image: provisioner-nfs

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM golang:1.14.7 as build
+FROM golang:1.17.2 as build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -40,7 +40,7 @@ COPY . .
 
 RUN make provisioner-nfs
 
-FROM alpine:3.12.0
+FROM alpine:3.13.6
 
 ARG DBUILD_DATE
 ARG DBUILD_REPO_URL
